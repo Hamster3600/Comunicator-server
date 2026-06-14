@@ -9,6 +9,8 @@ dependencies = [
  "keyring",
  "keyring-core",
  "reqwest",
+ "serde",
+ "serde_json",
  "tiny_http",
  "uuid",
 ]
