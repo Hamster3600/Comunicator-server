@@ -5,10 +5,10 @@ use tiny_http::{Server, Response};
 
 
 fn main() {
-    println!("[P2P-SERWER] Uruchamiam węzeł serwera na wątkach...");
+    println!("[COMUNICATOR-SERVER] Uruchamiam węzeł serwera na wątkach...");
 
     let server = Server::http("0.0.0.0:4001").unwrap();
-    println!("[P2P-SERWER] Serwer gotowy na porcie 4001...");
+    println!("[COMUNICATOR-SERVER] Serwer gotowy na porcie 4001...");
     println!("--------------------------------------------------");
 
     for mut request in server.incoming_requests() {
