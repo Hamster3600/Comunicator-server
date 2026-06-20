@@ -20,6 +20,22 @@ struct MessagePacket {
     content: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct ListRequest{
+    action: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct UserInfo{
+    nick: String,
+    hash: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ListResponse{
+    users: Vec<UserInfo>,
+}
+
 type RoutingTable = Arc<Mutex<HashMap<String, String>>>;
 
 fn forward_message(packet_body: &str, client_ip: String, routing_table: &RoutingTable, http_client: &reqwest::blocking::Client,) -> Result<String, String>{
@@ -44,12 +60,30 @@ fn forward_message(packet_body: &str, client_ip: String, routing_table: &Routing
     }
 }
 
+fn save_user_list(users: &Vec<String>) {
+    let entry = Entry::new("Comunicator-server", "user_list").unwrap();
+    let json = serde_json::to_string(users).unwrap();
+    entry.set_secret(json.as_bytes()).unwrap();
+}
+
 fn main() {
     let config = HashMap::new();
     keyring::use_sqlite_store(&config).unwrap();
 
+    let user_list_key = "Comunicator-server-userlist";
     let routing_table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
     let http_client = reqwest::blocking::Client::new();
+    let user_list: Arc<Mutex<Vec<String>>> = {
+        let entry = Entry::new("Comunicator-server", "user_list").unwrap();
+        match entry.get_secret(){
+            Ok(bytes) => {
+                let users: Vec<String> = serde_json::from_slice(&bytes).unwrap_or_default();
+                println!("[SERVER] Loaded {} user from persistent storage", users.len());
+                Arc::new(Mutex::new(users))
+            }
+            Err(_) => Arc::new(Mutex::new(Vec::new())),
+        }
+    };
 
     println!("[COMUNICATOR-SERVER] Running a server node on threads...");
 
@@ -60,6 +94,7 @@ fn main() {
     for mut request in server.incoming_requests() {
         let routing_table = Arc::clone(&routing_table);
         let http_client = http_client.clone();
+        let user_list = Arc::clone(&user_list);
         thread::spawn(move || {
             let mut body = String::new();
             
@@ -98,10 +133,32 @@ fn main() {
                     entry_hash.set_secret(new_hash.as_bytes()).unwrap();
                     entry_nick.set_secret(nick.as_bytes()).unwrap();
 
+                    user_list.lock().unwrap().push(nick.clone());
+                    save_user_list(&user_list.lock().unwrap());
+
                     let response = Response::from_string(new_hash);
                     let _ = request.respond(response);
                     return;
                 } 
+
+                if let Ok(list_req) = serde_json::from_str::<ListRequest>(&body) {
+                    if list_req.action == "list_users" {
+                        let nicks = user_list.lock().unwrap().clone();
+                        let users: Vec<UserInfo> = nicks.iter().filter_map(|nick|{
+                            let entry = Entry::new("Comunicator-server", &format!("{}_hash", nick)).unwrap();
+                            entry.get_secret().ok().and_then(|bytes| {
+                                String::from_utf8(bytes).ok().map(|hash| UserInfo {
+                                    nick: nick.clone(),
+                                    hash,
+                                })
+                            })
+                        }).collect();
+                        let response_body = serde_json::to_string(&ListResponse { users }).unwrap();
+                        let response = Response::from_string(response_body);
+                        let _ = request.respond(response);
+                        return;
+                    }
+                  }
                 
                 if let Ok(packet_msg) = serde_json::from_str::<MessagePacket>(&body) {
                     println!("\n[PACZKA DANYCH JSON]");
@@ -134,5 +191,5 @@ fn main() {
                 let _ = request.respond(response);
             }
         });
-        }
     }
+}
