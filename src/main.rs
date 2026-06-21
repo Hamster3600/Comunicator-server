@@ -161,7 +161,7 @@ fn main() {
                   }
                 
                 if let Ok(packet_msg) = serde_json::from_str::<MessagePacket>(&body) {
-                    println!("\n[PACZKA DANYCH JSON]");
+                    println!("\n[JSON DATA PACKET]");
                     println!("  From (Hash):   {}", packet_msg.sender_hash);
                     println!("  Nick:          {}", packet_msg.sender_nick);
                     println!("  To (Hash):     {}", packet_msg.target_hash);
