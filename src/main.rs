@@ -12,7 +12,7 @@ struct RegistrationPacket {
     nick: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct MessagePacket {
     target_hash: String,
     sender_hash: String,
@@ -36,9 +36,11 @@ struct ListResponse{
     users: Vec<UserInfo>,
 }
 
+type PendingMessages = Arc<Mutex<HashMap<String, Vec<MessagePacket>>>>;
+
 type RoutingTable = Arc<Mutex<HashMap<String, String>>>;
 
-fn forward_message(packet_body: &str, client_ip: String, routing_table: &RoutingTable, http_client: &reqwest::blocking::Client,) -> Result<String, String>{
+fn forward_message(packet_body: &str, client_ip: String, routing_table: &RoutingTable, http_client: &reqwest::blocking::Client, pending: &PendingMessages) -> Result<String, String>{
     let message: MessagePacket = serde_json::from_str(packet_body).map_err(|e| format!("Failed to parse message packet: {}", e))?;
 
     let client_address = format!("{}:4001", client_ip);
@@ -53,9 +55,13 @@ fn forward_message(packet_body: &str, client_ip: String, routing_table: &Routing
         let url = format!("http://{}", target_address);
         match http_client.post(&url).body(packet_body.to_string()).send(){
             Ok(_) => Ok(format!("Message rwarded to {} with hash {}", target_address, message.target_hash)),
-            Err(e) => Err(format!("Target is registered, but connection to port 4001 failed: {}", e)),
+            Err(e) => {
+                pending.lock().unwrap().entry(message.target_hash.clone()).or_default().push(message.clone());
+                Err(format!("Target is registered, but connection to port 4001 failed: {}", e))
+            }
         }
     }   else{
+        pending.lock().unwrap().entry(message.target_hash.clone()).or_default().push(message.clone());
         Err(format!("Target hash {} is offline or not existing(not in routing table)", message.target_hash))
     }
 }
@@ -71,6 +77,7 @@ fn main() {
     keyring::use_sqlite_store(&config).unwrap();
 
     let user_list_key = "Comunicator-server-userlist";
+    let pending: PendingMessages = Arc::new(Mutex::new(HashMap::new()));
     let routing_table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
     let http_client = reqwest::blocking::Client::new();
     let user_list: Arc<Mutex<Vec<String>>> = {
@@ -95,6 +102,7 @@ fn main() {
         let routing_table = Arc::clone(&routing_table);
         let http_client = http_client.clone();
         let user_list = Arc::clone(&user_list);
+        let pending = Arc::clone(&pending);
         thread::spawn(move || {
             let mut body = String::new();
             
@@ -158,7 +166,20 @@ fn main() {
                         let _ = request.respond(response);
                         return;
                     }
-                  }
+                }
+
+                if let Ok(sync_req) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if sync_req.get("action").and_then(|v| v.as_str()) == Some("sync") {
+                        if let Some(hash) = sync_req.get("hash").and_then(|v| v.as_str()){
+                            let mut pending_map = pending.lock().unwrap();
+                            let msgs = pending_map.remove(hash).unwrap_or_default();
+                            let response_body = serde_json::to_string(&serde_json::json!({"messages" : msgs})).unwrap();
+                            let response = Response::from_string(response_body);
+                            let _ = request.respond(response);
+                            return;
+                        }
+                    } 
+                }
                 
                 if let Ok(packet_msg) = serde_json::from_str::<MessagePacket>(&body) {
                     println!("\n[JSON DATA PACKET]");
@@ -171,7 +192,7 @@ fn main() {
                     let sender_ip = request.remote_addr().unwrap().ip().to_string();
 
                     if body.contains("target_hash") {
-                        match forward_message(&body, sender_ip, &routing_table, &http_client) {
+                        match forward_message(&body, sender_ip, &routing_table, &http_client, &pending) {
                             Ok(succes_msg) => {
                                 println!("[SERVER] {}", succes_msg);
                                 let response = tiny_http::Response::from_string("[SERVER] Message forwarded successfully.");
