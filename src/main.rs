@@ -36,6 +36,19 @@ struct ListResponse{
     users: Vec<UserInfo>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct ChangeNickRequest {
+    action: String,
+    hash: String,
+    new_nick: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ChangeHashRequest {
+    action: String,
+    old_hash: String,
+}
+
 type PendingMessages = Arc<Mutex<HashMap<String, Vec<MessagePacket>>>>;
 
 type RoutingTable = Arc<Mutex<HashMap<String, String>>>;
@@ -148,6 +161,62 @@ fn main() {
                     let _ = request.respond(response);
                     return;
                 } 
+
+                if let Ok(change_req) = serde_json::from_str::<ChangeNickRequest>(&body) {
+                    if change_req.action == "change_nick" {
+                        let reverse_entry = Entry::new("Comunicator-server", &change_req.hash).unwrap();
+                        let old_nick = reverse_entry.get_secret().ok()
+                            .and_then(|b| String::from_utf8(b).ok())
+                            .unwrap_or_default();
+                        let check = Entry::new("Comunicator-server", &format!("{}_hash", change_req.new_nick)).unwrap();
+                        if check.get_secret().is_ok() {
+                            let response = Response::from_string("[ERROR] Nick already taken.");
+                            let _ = request.respond(response);
+                            return;
+                        }
+
+                        let hash_val = Entry::new("Comunicator-server", &format!("{}_hash", old_nick)).unwrap().get_secret().unwrap();
+                        Entry::new("Comunicator-server", &format!("{}_hash", change_req.new_nick)).unwrap().set_secret(&hash_val).unwrap();
+                        Entry::new("Comunicator-server", &format!("{}_nick", change_req.new_nick)).unwrap().set_secret(change_req.new_nick.as_bytes()).unwrap();
+
+                        let _ = Entry::new("Comunicator-server", &format!("{}_hash", old_nick)).unwrap().set_secret(b"");
+                        let _ = Entry::new("Comunicator-server", &format!("{}_nick", old_nick)).unwrap().set_secret(b"");
+
+                        reverse_entry.set_secret(change_req.new_nick.as_bytes()).unwrap();
+
+                        let mut list = user_list.lock().unwrap();
+                        if let Some(pos) = list.iter().position(|n| n == &old_nick) {
+                            list[pos] = change_req.new_nick.clone();
+                        }
+                        save_user_list(&list);
+
+                        let response = Response::from_string("[OK] Nick Changed.");
+                        let _ = request.respond(response);
+                        return;
+                    }
+                }
+
+                if let Ok(change_req) = serde_json::from_str::<ChangeHashRequest>(&body) {
+                    if change_req.action == "change_hash" {
+                        let reverse_entry = Entry::new("Comunicator-server", &change_req.old_hash).unwrap();
+                        let nick = reverse_entry.get_secret().ok()
+                            .and_then(|b| String::from_utf8(b).ok())
+                            .unwrap_or_default();
+                        if nick.is_empty() {
+                            let response = Response::from_string("[ERROR] Invalid hash.");
+                            let _ = request.respond(response);
+                            return;
+                        }
+                        let new_hash = Uuid::new_v4().to_string();
+                        Entry::new("Comunicator-server", &format!("{}_hash", nick)).unwrap().set_secret(new_hash.as_bytes()).unwrap();
+                        let _ = Entry::new("Comunicator-server", &change_req.old_hash).unwrap().set_secret(b"");
+                        Entry::new("Comunicator-server", &new_hash).unwrap().set_secret(nick.as_bytes()).unwrap();
+
+                        let response = Response::from_string(new_hash);
+                        let _ = request.respond(response);
+                        return;
+                    }
+                }
 
                 if let Ok(list_req) = serde_json::from_str::<ListRequest>(&body) {
                     if list_req.action == "list_users" {
