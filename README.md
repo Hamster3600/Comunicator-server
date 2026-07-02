@@ -17,7 +17,7 @@ Central server for the Comunicator chat system – handles registration, message
 
 ## Download
 
-Get the latest binary from **[Releases](https://github.com/dawidszcz1/Comunicator-server/releases)**.
+Get the latest binary from **[Releases](https://github.com/Hamster3600/Comunicator-server/releases)**.
 
 ```bash
 chmod +x comunicator-server
