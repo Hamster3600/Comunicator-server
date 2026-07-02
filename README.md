@@ -94,7 +94,7 @@ Client A ──POST msg──▶  Server  ──forward──▶  Client B (port
 
 ## Client side
 
-**[Client](https://github.com/dawidszcz1/Comunicator-server/releases)**
+**[Client]([https://github.com/dawidszcz1/Comunicator-server/releases](https://github.com/Hamster3600/Comunicator-client))**
 ---
 
 ## License
