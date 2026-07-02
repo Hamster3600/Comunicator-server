@@ -92,6 +92,9 @@ Client A ──POST msg──▶  Server  ──forward──▶  Client B (port
 | `keyring` | Persistent nick/hash storage (SQLite) |
 | `uuid` | Generating unique hashes |
 
+## Client side
+
+**[Client](https://github.com/dawidszcz1/Comunicator-server/releases)**
 ---
 
 ## License
